@@ -12,8 +12,8 @@ logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %
 # Данные SMTP сервера
 host_addr = 'smtp.yandex.ru'
 port = 465
-user_name = 'Jenko-res'
-application_password = 'qkadsxkgmugiulum'
+user_name = ''
+application_password = ''
 
 # Функция для отправки запроса и получения ответа построчно
 def request(sock, request):
