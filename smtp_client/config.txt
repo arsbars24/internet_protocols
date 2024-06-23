@@ -1,3 +1,3 @@
-subject: Тестовое письмо с вложениями
-to: recipient1@example.com, recipient2@example.com
-attachments: attachment1.jpg, attachment2.pdf
+subject: Некая тема
+to: Jenko-res@yandex.ru
+attachments: attachment1.jpg

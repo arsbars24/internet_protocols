@@ -1,56 +1,82 @@
 import base64
 import socket
 import ssl
+import mimetypes
+import logging
+import random
+import string
+
+# Настройка логирования
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Данные SMTP сервера
 host_addr = 'smtp.yandex.ru'
 port = 465
-user_name = 'ВАШ ЛОГИН'
-application_password = 'ВАШ ПАРОЛЬ'
+user_name = 'Jenko-res'
+application_password = 'qkadsxkgmugiulum'
 
-
-# Функция для отправки запроса и получения ответа
-def request(socket, request):
-    socket.send(request + b'\r\n')
-    recv_data = socket.recv(65535).decode()
-    return recv_data
-
+# Функция для отправки запроса и получения ответа построчно
+def request(sock, request):
+    logging.debug(f"Sending: {request.decode()}")
+    sock.sendall(request + b'\r\n')
+    recv_data = b""
+    while True:
+        chunk = sock.recv(1024)
+        recv_data += chunk
+        if len(chunk) < 1024:
+            break
+    response = recv_data.decode()
+    logging.debug(f"Received: {response}")
+    return response
 
 # Функция для чтения конфигурации из файла
 def read_config():
     config = {}
-    with open('config.txt', 'r') as file:
+    with open('config.txt', 'r', encoding='utf-8') as file:
         for line in file:
             key, value = line.split(':', 1)
             config[key.strip()] = value.strip()
     return config
 
+# Функция для создания уникальной границы
+def create_boundary():
+    random_part = ''.join(random.choices(string.ascii_letters + string.digits, k=16))
+    return f"unique_boundary_string_{random_part}"
+
+# Функция для обработки строк с точками
+def handle_dot_stuffing(text):
+    lines = text.split('\n')
+    for i in range(len(lines)):
+        if lines[i].startswith('.'):
+            lines[i] = '.' + lines[i]
+    return '\n'.join(lines)
 
 # Функция для создания письма с вложениями
 def create_email(config):
-    boundary = "unique_boundary_string_123456"  # Уникальная граница для MIME частей
-    email = f"From: {user_name}\n"
+    boundary = create_boundary()
+
+    email = f"From: {user_name}@yandex.ru\n"
     email += f"To: {config['to']}\n"
     email += f"Subject: {config['subject']}\n"
+    email += f"MIME-Version: 1.0\n"
     email += f"Content-Type: multipart/mixed; boundary=\"{boundary}\"\n\n"
     email += f"--{boundary}\n"
 
     # Текстовая часть письма
-    email += "Content-Type: text/plain; charset=utf-8\n\n"
-    with open('body.txt', 'r') as file:
-        email += file.read() + '\n'
+    email += "Content-Type: text/plain; charset=utf-8\n"
+    email += "Content-Transfer-Encoding: 7bit\n\n"
+    with open('body.txt', 'r', encoding='utf-8') as file:
+        email += handle_dot_stuffing(file.read()) + '\n'
 
     # Вложения
     attachments = config['attachments'].split(',')
     for attachment in attachments:
         attachment = attachment.strip()
         email += f"--{boundary}\n"
-        mime_type = "application/octet-stream"
-        if attachment.endswith(".jpg"):
-            mime_type = "image/jpeg"
-        elif attachment.endswith(".pdf"):
-            mime_type = "application/pdf"
-        email += f"Content-Type: {mime_type}\n"
+        mime_type, _ = mimetypes.guess_type(attachment)
+        if mime_type is None:
+            mime_type = "application/octet-stream"
+        email += f"Content-Type: {mime_type}; name=\"{attachment}\"\n"
         email += f"Content-Disposition: attachment; filename=\"{attachment}\"\n"
         email += "Content-Transfer-Encoding: base64\n\n"
         with open(attachment, 'rb') as file:
@@ -59,39 +85,44 @@ def create_email(config):
     email += f"--{boundary}--\n"
     return email
 
-
 # Основная функция для отправки письма
 def send_email():
     config = read_config()
+    context = ssl.create_default_context()
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as ssock:
+            logging.info(f"Connecting to {host_addr}:{port}")
+            ssock.connect((host_addr, port))
+            logging.info("Connection established")
+            with context.wrap_socket(ssock, server_hostname=host_addr) as client:
+                logging.debug(client.recv(1024).decode())
+                logging.debug(request(client, f"EHLO {user_name}".encode('utf-8')))
+                base64login = base64.b64encode(user_name.encode())
+                base64password = base64.b64encode(application_password.encode())
 
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client:
-        client.connect((host_addr, port))
-        context = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2)
-        client = context.wrap_socket(client, server_hostname=host_addr)
+                logging.debug(request(client, b'AUTH LOGIN'))
+                logging.debug(request(client, base64login))
+                logging.debug(request(client, base64password))
 
-        print(client.recv(1024).decode())
-        print(request(client, bytes(f"EHLO {user_name}", 'utf-8')))
-        base64login = base64.b64encode(user_name.encode())
-        base64password = base64.b64encode(application_password.encode())
+                logging.debug(request(client, f"MAIL FROM:<{user_name}@yandex.ru>".encode('utf-8')))
 
-        print(request(client, b'AUTH LOGIN'))
-        print(request(client, base64login))
-        print(request(client, base64password))
+                recipients = config['to'].split(',')
+                for recipient in recipients:
+                    logging.debug(request(client, f"RCPT TO:<{recipient.strip()}>".encode('utf-8')))
 
-        print(request(client, bytes(f'MAIL FROM:<{user_name}@yandex.ru>', 'utf-8')))
+                logging.debug(request(client, b'DATA'))
 
-        recipients = config['to'].split(',')
-        for recipient in recipients:
-            print(request(client, bytes(f'RCPT TO:<{recipient.strip()}>', 'utf-8')))
-
-        print(request(client, b'DATA'))
-
-        email = create_email(config)
-        print(request(client, bytes(email, 'utf-8')))
-        print(request(client, b'.'))
-
-        print(request(client, b'QUIT'))
-
+                email = create_email(config)
+                client.sendall(email.encode('utf-8') + b'\r\n.\r\n')
+                logging.debug(request(client, b'QUIT'))
+    except socket.timeout as e:
+        logging.error(f"A socket timeout occurred: {e}")
+    except socket.error as e:
+        logging.error(f"A socket error occurred: {e}")
+    except ssl.SSLError as e:
+        logging.error(f"An SSL error occurred: {e}")
+    except Exception as e:
+        logging.error(f"An error occurred: {e}")
 
 if __name__ == "__main__":
     send_email()
