@@ -1,63 +1,25 @@
 import time
 
-class DNSObject:
-    def __init__(self, ttl, name=None):
-        self.name = name
-        self.init_time = time.time()
-        self.ttl = ttl
-        self.objects = []
-
-class Cache:
+class DNSCache:
     def __init__(self):
-        self.a = None
-        self.aaaa = None
-        self.ns = None
-        self.ptr = None
+        self.domain_to_ip = {}
+        self.ip_to_domain = {}
+        self.expiry_times = {}
 
-    def delete_expired_records(self):
-        if self.a is not None and remain_ttl(self.a) == 0:
-            self.a = None
-        if self.aaaa is not None and remain_ttl(self.aaaa) == 0:
-            self.aaaa = None
-        if self.ns is not None and remain_ttl(self.ns) == 0:
-            self.ns = None
-        if self.ptr is not None and remain_ttl(self.ptr) == 0:
-            self.ptr = None
+    def add(self, query_name, ip_address, ttl):
+        expiry_time = time.time() + ttl
+        self.domain_to_ip[query_name] = (ip_address, expiry_time)
+        self.ip_to_domain[ip_address] = (query_name, expiry_time)
 
-def remain_ttl(obj):
-    passed_time = int(time.time() - obj.init_time)
-    return max(0, obj.ttl - passed_time)
+    def get(self, query_name):
+        current_time = time.time()
+        if query_name in self.domain_to_ip:
+            ip, expiry_time = self.domain_to_ip[query_name]
+            if expiry_time > current_time:
+                return ip
+        return None
 
-def save_cache(cache):
-    try:
-        with open('dns_cache.txt', 'w') as file:
-            for name, records in cache.items():
-                file.write(name + '\n')
-                for record_type, data in records.items():
-                    file.write(f"{record_type}:{data.name}:{data.ttl}:{','.join(data.objects)}\n")
-            print("Кэш сохранен в файл dns_cache.txt")
-    except Exception as e:
-        print("Ошибка при сохранении кэша:", e)
-
-def load_cache():
-    cache = {}
-    try:
-        with open('dns_cache.txt', 'r') as file:
-            lines = file.readlines()
-            name = None
-            for line in lines:
-                line = line.strip()
-                if line:
-                    if ':' not in line:
-                        name = line
-                        cache[name] = {}
-                    else:
-                        record_type, name, ttl, *objects = line.split(':')
-                        cache[name][record_type] = DNSObject(int(ttl), name)
-                        cache[name][record_type].objects = objects
-            print("Кэш загружен из файла dns_cache.txt")
-    except FileNotFoundError:
-        print("Файл кэша не найден")
-    except Exception as e:
-        print("Ошибка при загрузке кэша:", e)
-    return cache
+    def remove_expired_records(self):
+        current_time = time.time()
+        self.domain_to_ip = {k: v for k, v in self.domain_to_ip.items() if v[1] > current_time}
+        self.ip_to_domain = {k: v for k, v in self.ip_to_domain.items() if v[1] > current_time}
